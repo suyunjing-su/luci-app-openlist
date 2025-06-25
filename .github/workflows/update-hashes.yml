@@ -1,0 +1,158 @@
+name: Update Makefile Hashes
+
+on:
+  workflow_dispatch:
+    inputs:
+      openlist_version:
+        description: 'OpenList version to update to (e.g., 4.0.4)'
+        required: true
+        type: string
+      frontend_version:
+        description: 'Frontend version to update to (e.g., 4.0.4)'
+        required: true
+        type: string
+  schedule:
+    # Run weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-hashes:
+    name: Update Makefile Hashes
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "openlist_version=${{ github.event.inputs.openlist_version }}" >> $GITHUB_OUTPUT
+            echo "frontend_version=${{ github.event.inputs.frontend_version }}" >> $GITHUB_OUTPUT
+          else
+            # For scheduled runs, get the latest versions from GitHub API
+            OPENLIST_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+            FRONTEND_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList-Frontend/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+            echo "openlist_version=$OPENLIST_VERSION" >> $GITHUB_OUTPUT
+            echo "frontend_version=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download and calculate OpenList hash
+        id: openlist_hash
+        run: |
+          VERSION="${{ steps.vars.outputs.openlist_version }}"
+          URL="https://codeload.github.com/OpenListTeam/OpenList/tar.gz/v${VERSION}"
+          
+          echo "Downloading OpenList v${VERSION}..."
+          wget -O "openlist-${VERSION}.tar.gz" "$URL"
+          
+          HASH=$(sha256sum "openlist-${VERSION}.tar.gz" | cut -d' ' -f1)
+          echo "OpenList hash: $HASH"
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          
+          rm "openlist-${VERSION}.tar.gz"
+
+      - name: Download and calculate Frontend hash
+        id: frontend_hash
+        run: |
+          VERSION="${{ steps.vars.outputs.frontend_version }}"
+          URL="https://github.com/OpenListTeam/OpenList-Frontend/releases/download/v${VERSION}/openlist-frontend-dist-v${VERSION}.tar.gz"
+          
+          echo "Downloading Frontend v${VERSION}..."
+          wget -O "openlist-frontend-dist-v${VERSION}.tar.gz" "$URL"
+          
+          HASH=$(sha256sum "openlist-frontend-dist-v${VERSION}.tar.gz" | cut -d' ' -f1)
+          echo "Frontend hash: $HASH"
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          
+          rm "openlist-frontend-dist-v${VERSION}.tar.gz"
+
+      - name: Update Makefile
+        run: |
+          OPENLIST_VERSION="${{ steps.vars.outputs.openlist_version }}"
+          FRONTEND_VERSION="${{ steps.vars.outputs.frontend_version }}"
+          OPENLIST_HASH="${{ steps.openlist_hash.outputs.hash }}"
+          FRONTEND_HASH="${{ steps.frontend_hash.outputs.hash }}"
+          
+          echo "Updating Makefile with:"
+          echo "  OpenList version: $OPENLIST_VERSION"
+          echo "  OpenList hash: $OPENLIST_HASH"
+          echo "  Frontend version: $FRONTEND_VERSION"
+          echo "  Frontend hash: $FRONTEND_HASH"
+          
+          # Update PKG_VERSION and PKG_WEB_VERSION
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$OPENLIST_VERSION/" openlist/Makefile
+          sed -i "s/^PKG_WEB_VERSION:=.*/PKG_WEB_VERSION:=$FRONTEND_VERSION/" openlist/Makefile
+          
+          # Update PKG_HASH
+          sed -i "s/^PKG_HASH:=.*/PKG_HASH:=$OPENLIST_HASH/" openlist/Makefile
+          
+          # Update Frontend HASH
+          sed -i "/define Download\/openlist-frontend/,/endef/ s/^  HASH:=.*/  HASH:=$FRONTEND_HASH/" openlist/Makefile
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet openlist/Makefile; then
+            echo "No changes detected in Makefile"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected in Makefile"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            git diff openlist/Makefile
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            Update Makefile hashes
+            
+            - Update OpenList to v${{ steps.vars.outputs.openlist_version }}
+            - Update Frontend to v${{ steps.vars.outputs.frontend_version }}
+            - Update PKG_HASH to ${{ steps.openlist_hash.outputs.hash }}
+            - Update Frontend HASH to ${{ steps.frontend_hash.outputs.hash }}
+          title: "Update Makefile hashes to OpenList v${{ steps.vars.outputs.openlist_version }} / Frontend v${{ steps.vars.outputs.frontend_version }}"
+          body: |
+            ## 🔄 Automatic Hash Update
+            
+            This PR automatically updates the hash values in the Makefile for the latest versions:
+            
+            ### Changes
+            - **OpenList Version**: `${{ steps.vars.outputs.openlist_version }}`
+            - **Frontend Version**: `${{ steps.vars.outputs.frontend_version }}`
+            - **OpenList Hash**: `${{ steps.openlist_hash.outputs.hash }}`
+            - **Frontend Hash**: `${{ steps.frontend_hash.outputs.hash }}`
+            
+            ### Verification
+            The hashes have been calculated by downloading the actual release files and computing their SHA256 checksums.
+            
+            ---
+            *This PR was created automatically by the Update Makefile Hashes workflow.*
+          branch: update-makefile-hashes-${{ steps.vars.outputs.openlist_version }}-${{ steps.vars.outputs.frontend_version }}
+          delete-branch: true
+          draft: false
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.changes.outputs.has_changes }}" = "true" ]; then
+            echo "✅ Makefile updated successfully!"
+            echo "📝 Pull request created with the updated hashes"
+          else
+            echo "ℹ️ No updates needed - Makefile is already up to date"
+          fi
+          
+          echo ""
+          echo "📊 Current versions:"
+          echo "  OpenList: v${{ steps.vars.outputs.openlist_version }}"
+          echo "  Frontend: v${{ steps.vars.outputs.frontend_version }}"
