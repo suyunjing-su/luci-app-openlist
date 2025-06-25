@@ -5,7 +5,9 @@ on:
     tags:
       - "*"
 
-permissions: write-all
+permissions:
+  actions: write
+  contents: write
 
 jobs:
   build:
