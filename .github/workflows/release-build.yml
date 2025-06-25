@@ -5,6 +5,8 @@ on:
     tags:
       - "*"
 
+permissions: write-all
+
 jobs:
   build:
     name: Build ${{ matrix.arch }}-${{ matrix.sdk }}
