@@ -2,9 +2,8 @@ name: Update Makefile Hashes
 
 on:
   workflow_dispatch:
-  schedule:
-    # Run weekly on Sundays at 02:00 UTC
-    - cron: '0 2 * * 0'
+  repository_dispatch:
+    types: [update-hashes]
 
 permissions:
   contents: write
