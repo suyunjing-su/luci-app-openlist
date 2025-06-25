@@ -2,15 +2,6 @@ name: Update Makefile Hashes
 
 on:
   workflow_dispatch:
-    inputs:
-      openlist_version:
-        description: 'OpenList version to update to (e.g., 4.0.4)'
-        required: true
-        type: string
-      frontend_version:
-        description: 'Frontend version to update to (e.g., 4.0.4)'
-        required: true
-        type: string
   schedule:
     # Run weekly on Sundays at 02:00 UTC
     - cron: '0 2 * * 0'
@@ -30,19 +21,18 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up variables
+      - name: Get latest versions
         id: vars
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "openlist_version=${{ github.event.inputs.openlist_version }}" >> $GITHUB_OUTPUT
-            echo "frontend_version=${{ github.event.inputs.frontend_version }}" >> $GITHUB_OUTPUT
-          else
-            # For scheduled runs, get the latest versions from GitHub API
-            OPENLIST_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-            FRONTEND_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList-Frontend/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-            echo "openlist_version=$OPENLIST_VERSION" >> $GITHUB_OUTPUT
-            echo "frontend_version=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
-          fi
+          # Get the latest versions from GitHub API
+          OPENLIST_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          FRONTEND_VERSION=$(curl -s https://api.github.com/repos/OpenListTeam/OpenList-Frontend/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          
+          echo "Latest OpenList version: $OPENLIST_VERSION"
+          echo "Latest Frontend version: $FRONTEND_VERSION"
+          
+          echo "openlist_version=$OPENLIST_VERSION" >> $GITHUB_OUTPUT
+          echo "frontend_version=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
 
       - name: Download and calculate OpenList hash
         id: openlist_hash
@@ -87,7 +77,7 @@ jobs:
           echo "  Frontend version: $FRONTEND_VERSION"
           echo "  Frontend hash: $FRONTEND_HASH"
           
-          # Update PKG_VERSION and PKG_WEB_VERSION
+          # Update PKG_VERSION and PKG_WEB_VERSION to match OpenList main repo
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$OPENLIST_VERSION/" openlist/Makefile
           sed -i "s/^PKG_WEB_VERSION:=.*/PKG_WEB_VERSION:=$FRONTEND_VERSION/" openlist/Makefile
           
@@ -119,10 +109,10 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         run: |
           git add openlist/Makefile
-          git commit -m "Update Makefile hashes
+          git commit -m "Update Makefile to latest versions
 
-          - Update OpenList to v${{ steps.vars.outputs.openlist_version }}
-          - Update Frontend to v${{ steps.vars.outputs.frontend_version }}
+          - Update OpenList to latest v${{ steps.vars.outputs.openlist_version }}
+          - Update Frontend to latest v${{ steps.vars.outputs.frontend_version }}
           - Update PKG_HASH to ${{ steps.openlist_hash.outputs.hash }}
           - Update Frontend HASH to ${{ steps.frontend_hash.outputs.hash }}
 
@@ -133,13 +123,13 @@ jobs:
       - name: Summary
         run: |
           if [ "${{ steps.changes.outputs.has_changes }}" = "true" ]; then
-            echo "✅ Makefile updated successfully!"
+            echo "✅ Makefile updated to latest versions!"
             echo "🚀 Changes committed and pushed to main branch"
           else
-            echo "ℹ️ No updates needed - Makefile is already up to date"
+            echo "ℹ️ No updates needed - Makefile is already using latest versions"
           fi
           
           echo ""
-          echo "📊 Current versions:"
+          echo "📊 Latest versions detected:"
           echo "  OpenList: v${{ steps.vars.outputs.openlist_version }}"
           echo "  Frontend: v${{ steps.vars.outputs.frontend_version }}"
